@@ -34,7 +34,13 @@
     linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
   background-size: 16px 16px;
   font-family: 'Press Start 2P', 'Courier New', monospace;
-  font-size: 10px;
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  :root {
+    font-size: 12px;
+  }
 }
 
 body {
