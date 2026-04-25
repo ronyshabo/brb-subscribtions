@@ -110,6 +110,8 @@ const SubscriptionLookup = () => {
 
         <form onSubmit={handleLookup} className="lookup-form">
           <input
+            id="phone"
+            name="phone"
             type="tel"
             className="phone-input"
             placeholder="e.g. 5125551234"
