@@ -18,6 +18,23 @@ npm install
 npm run dev
 ```
 
+## Firestore security rules
+
+This repo includes a `firestore.rules` file that:
+
+- Allows only single-record subscriber lookup queries (limit 1)
+- Allows only drink-redemption updates (`drinksRemaining`, `drinksToday`, `lastUsedDate`)
+- Blocks create/delete and all other collection access
+
+Deploy rules with Firebase CLI:
+
+```bash
+npm install -g firebase-tools
+firebase login
+firebase use <your-firebase-project-id>
+firebase deploy --only firestore:rules
+```
+
 ## Build & Deploy on EC2
 
 ### 1. Copy to server

@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /subscribers/{subscriberId} {
+      // Allow single-record lookups and small queries only (used by phone search with limit 1).
+      allow get: if true;
+      allow list: if request.query.limit != null && request.query.limit <= 1;
+
+      // Barista app can only redeem a drink. No client-side create/delete/admin edits.
+      allow create, delete: if false;
+      allow update: if isValidRedeemUpdate(resource.data, request.resource.data);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+
+  function isValidDateString(value) {
+    return value is string && value.matches('^\\d{4}-\\d{2}-\\d{2}$');
+  }
+
+  function isValidRedeemUpdate(before, after) {
+    return
+      // Keep document shape intact.
+      after.keys().hasOnly(before.keys()) &&
+      // Immutable identity/plan fields.
+      after.phone == before.phone &&
+      after.name == before.name &&
+      after.type == before.type &&
+      after.drink == before.drink &&
+      // Redeem exactly one drink.
+      before.drinksRemaining is int &&
+      after.drinksRemaining is int &&
+      after.drinksRemaining == before.drinksRemaining - 1 &&
+      after.drinksRemaining >= 0 &&
+      // Daily counter stays bounded.
+      after.drinksToday is int &&
+      after.drinksToday >= 1 &&
+      after.drinksToday <= 3 &&
+      // Date format enforced.
+      isValidDateString(after.lastUsedDate);
+  }
+}

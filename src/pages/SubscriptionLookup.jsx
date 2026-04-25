@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { collection, getDocs, doc, updateDoc } from 'firebase/firestore'
+import { collection, getDocs, doc, updateDoc, query, where, limit } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import './SubscriptionLookup.css'
 
@@ -19,10 +19,14 @@ const SubscriptionLookup = () => {
     setSubscription(null)
 
     try {
-      const querySnapshot = await getDocs(collection(db, 'subscribers'))
-      const found = querySnapshot.docs
-        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-        .find(sub => sub.phone === phone.trim())
+      const normalizedPhone = phone.trim()
+      const subscribersRef = collection(db, 'subscribers')
+      const lookupQuery = query(subscribersRef, where('phone', '==', normalizedPhone), limit(1))
+      const querySnapshot = await getDocs(lookupQuery)
+
+      const found = querySnapshot.docs.length
+        ? { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() }
+        : null
 
       if (found) {
         setSubscription(found)
