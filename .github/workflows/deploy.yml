@@ -1,0 +1,141 @@
+name: Deploy brb-subscriptions
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || secrets.VITE_FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN || secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || secrets.VITE_FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET || secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || secrets.VITE_FIREBASE_APP_ID }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          missing=0
+
+          required_vars=(
+            FIREBASE_API_KEY
+            FIREBASE_AUTH_DOMAIN
+            FIREBASE_PROJECT_ID
+            FIREBASE_STORAGE_BUCKET
+            FIREBASE_MESSAGING_SENDER_ID
+            FIREBASE_APP_ID
+            EC2_HOST
+            EC2_USER
+            EC2_SSH_KEY
+          )
+
+          for var_name in "${required_vars[@]}"; do
+            if [ -z "${!var_name:-}" ]; then
+              echo "::error::Missing required GitHub secret: ${var_name}"
+              missing=1
+            fi
+          done
+
+          if [ -n "${EC2_SSH_PORT:-}" ] && ! [[ "${EC2_SSH_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "::error::EC2_SSH_PORT must be numeric when set."
+            missing=1
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Build Docker image
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || secrets.VITE_FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN || secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || secrets.VITE_FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET || secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || secrets.VITE_FIREBASE_APP_ID }}
+        run: |
+          set -euo pipefail
+          export DOCKER_BUILDKIT=1
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+
+          printf '%s' "$FIREBASE_API_KEY" > "$tmp_dir/VITE_FIREBASE_API_KEY"
+          printf '%s' "$FIREBASE_AUTH_DOMAIN" > "$tmp_dir/VITE_FIREBASE_AUTH_DOMAIN"
+          printf '%s' "$FIREBASE_PROJECT_ID" > "$tmp_dir/VITE_FIREBASE_PROJECT_ID"
+          printf '%s' "$FIREBASE_STORAGE_BUCKET" > "$tmp_dir/VITE_FIREBASE_STORAGE_BUCKET"
+          printf '%s' "$FIREBASE_MESSAGING_SENDER_ID" > "$tmp_dir/VITE_FIREBASE_MESSAGING_SENDER_ID"
+          printf '%s' "$FIREBASE_APP_ID" > "$tmp_dir/VITE_FIREBASE_APP_ID"
+
+          docker build \
+            --secret id=VITE_FIREBASE_API_KEY,src="$tmp_dir/VITE_FIREBASE_API_KEY" \
+            --secret id=VITE_FIREBASE_AUTH_DOMAIN,src="$tmp_dir/VITE_FIREBASE_AUTH_DOMAIN" \
+            --secret id=VITE_FIREBASE_PROJECT_ID,src="$tmp_dir/VITE_FIREBASE_PROJECT_ID" \
+            --secret id=VITE_FIREBASE_STORAGE_BUCKET,src="$tmp_dir/VITE_FIREBASE_STORAGE_BUCKET" \
+            --secret id=VITE_FIREBASE_MESSAGING_SENDER_ID,src="$tmp_dir/VITE_FIREBASE_MESSAGING_SENDER_ID" \
+            --secret id=VITE_FIREBASE_APP_ID,src="$tmp_dir/VITE_FIREBASE_APP_ID" \
+            -t brb-subscriptions:latest .
+
+      - name: Deploy to AWS EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
+          EC2_HOST_KEY: ${{ secrets.EC2_HOST_KEY }}
+        run: |
+          set -euo pipefail
+          SSH_PORT="${EC2_SSH_PORT:-22}"
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20"
+          echo "Deploying to ${EC2_USER}@${EC2_HOST}:${SSH_PORT}"
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          trap 'rm -f ~/.ssh/id_rsa brb-subscriptions.tar' EXIT
+
+          if [ -n "${EC2_HOST_KEY:-}" ]; then
+            echo "$EC2_HOST_KEY" > ~/.ssh/known_hosts
+          else
+            if ! ssh-keyscan -T 15 -p "$SSH_PORT" -H "$EC2_HOST" >> ~/.ssh/known_hosts; then
+              echo "::error::ssh-keyscan failed. Check EC2_HOST/EC2_SSH_PORT reachability or set EC2_HOST_KEY secret."
+              exit 1
+            fi
+          fi
+
+          ssh -p "$SSH_PORT" -i ~/.ssh/id_rsa $SSH_OPTS $EC2_USER@$EC2_HOST "echo Connected to \\$(hostname)"
+
+          docker save brb-subscriptions:latest > brb-subscriptions.tar
+          scp -P "$SSH_PORT" -i ~/.ssh/id_rsa $SSH_OPTS brb-subscriptions.tar $EC2_USER@$EC2_HOST:/tmp/
+
+          ssh -p "$SSH_PORT" -i ~/.ssh/id_rsa $SSH_OPTS $EC2_USER@$EC2_HOST << 'EOF'
+          set -euo pipefail
+          command -v docker >/dev/null 2>&1 || { echo "Docker is not installed on EC2"; exit 1; }
+          docker load < /tmp/brb-subscriptions.tar
+          docker stop brb-subscriptions || true
+          docker rm brb-subscriptions || true
+          docker run -d \
+            --name brb-subscriptions \
+            --restart unless-stopped \
+            -p 127.0.0.1:3004:80 \
+            brb-subscriptions:latest
+          docker ps --filter name=brb-subscriptions --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+          docker inspect -f '{{.State.Running}}' brb-subscriptions | grep true
+          rm /tmp/brb-subscriptions.tar
+          EOF
