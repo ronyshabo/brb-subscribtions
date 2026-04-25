@@ -28,8 +28,8 @@ jobs:
           FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || secrets.VITE_FIREBASE_APP_ID }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY || secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT || secrets.EC2_PORT }}
         run: |
           set -euo pipefail
           missing=0
@@ -48,7 +48,11 @@ jobs:
 
           for var_name in "${required_vars[@]}"; do
             if [ -z "${!var_name:-}" ]; then
-              echo "::error::Missing required GitHub secret: ${var_name}"
+              if [ "${var_name}" = "EC2_SSH_KEY" ]; then
+                echo "::error::Missing required GitHub secret: EC2_SSH_KEY or EC2_SSH_PRIVATE_KEY"
+              else
+                echo "::error::Missing required GitHub secret: ${var_name}"
+              fi
               missing=1
             fi
           done
@@ -96,8 +100,8 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY || secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT || secrets.EC2_PORT }}
           EC2_HOST_KEY: ${{ secrets.EC2_HOST_KEY }}
         run: |
           set -euo pipefail
