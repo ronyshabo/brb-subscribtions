@@ -105,7 +105,7 @@ jobs:
           EC2_HOST_KEY: ${{ secrets.EC2_HOST_KEY }}
         run: |
           set -euo pipefail
-          SSH_PORT="${EC2_SSH_PORT:-22}"
+          SSH_PORT="${EC2_SSH_PORT:-2222}"
           SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20"
           echo "Deploying to ${EC2_USER}@${EC2_HOST}:${SSH_PORT}"
 
